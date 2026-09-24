@@ -214,3 +214,40 @@ teste de integração.
 3. A primeira publicação no GHCR cria o pacote privado. Com o login via
    `GITHUB_TOKEN` no `gpu.yaml` o pull funciona igual. Tornar público é opcional
    e manual.
+
+## 8. Revisões pós-aprovação (2026-09-24)
+
+Pedidos do autor depois da primeira versão da spec. **Sobrepõem** as seções acima
+quando houver conflito.
+
+1. **Nada de download local durante a implementação.** O código é escrito e
+   verificado sem baixar torch/imagens na máquina do autor (internet ruim no
+   momento). Testes que precisam de torch rodam no `ci.yaml` (GitHub-hosted).
+   O README descreve os passos para o autor executar depois.
+2. **Sempre a versão mais nova de tudo**, aceitando re-download. Isso substitui
+   as "tags fixas" das seções 2 e 3.4:
+   - Base da imagem: **resolvida a cada build** por
+     `scripts/latest_pytorch_base.py`: maior versão do torch, depois maior CUDA,
+     no formato `<torch>-cuda<X.Y>-cudnn<N>-runtime`, limitada por
+     `MAX_CUDA` (CUDA máximo do driver do host; hoje `13.4`, driver 615).
+     `pytorch/pytorch:latest` **não** é usado: está parado em 2024-02-23
+     (PyTorch 2.2.1).
+   - `image.yaml` também roda semanalmente (`schedule`) e com `pull: true`.
+   - ARC: chart sem `--version`. Device plugin: tag da release mais recente,
+     resolvida via API do GitHub no `cluster.sh`. Runner:
+     `ghcr.io/actions/actions-runner:latest`.
+   - Actions nos majors mais novos + Dependabot (`github-actions`) semanal.
+   - Cada execução imprime as versões resolvidas (step summary do
+     `image.yaml`, relatório do ambiente no container, `cluster.sh status`).
+3. **Conflito de GPU com o cluster antigo:** já existe um cluster kind `kind`
+   (projetos anteriores) com device plugin próprio. O `cluster.sh up` avisa e
+   para se houver outro cluster kind rodando com GPU. O README manda derrubá-lo.
+4. `Dockerfile` não roda `pip install`: copia só o pacote e roda
+   `python -m pytorch_arc_hosted`. Torch/torchvision vêm da base, e um
+   `RUN python -c "import torchvision"` garante isso no build. `pytest` não
+   roda dentro da imagem (a seção 5 fica restrita ao `ci.yaml`).
+5. `CLAUDE.md` é também o **documento de handoff**: estado atual, decisões,
+   pendências e próximos passos, para continuar o projeto numa sessão nova sem
+   o histórico desta conversa.
+6. `SAGA-DA-RTX3050.md` vem para este repo (Parte I = projetos anteriores,
+   intacta) e ganha a Parte II com a jornada do `pytorch-arc-hosted`.
