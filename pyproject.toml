@@ -1,0 +1,20 @@
+[project]
+name = "pytorch-arc-hosted"
+version = "0.1.0"
+description = "Benchmark de GPU e treino de ResNet/CIFAR-10 numa GPU real, via GitHub Actions + ARC + Docker"
+requires-python = ">=3.10"
+dependencies = ["torch", "torchvision"]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "scripts"]
