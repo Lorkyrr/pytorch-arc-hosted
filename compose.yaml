@@ -1,0 +1,22 @@
+# Uso local, fora do CI. Mesma imagem e mesmo volume de dataset do gpu.yaml.
+#   docker compose run --rm app                         # benchmark
+#   docker compose run --rm app train --epochs 30       # treino (checkpoint em ./out)
+services:
+  app:
+    image: ghcr.io/lorkyrr/pytorch-arc-hosted:latest
+    build: .
+    shm_size: 1gb # os workers do DataLoader trocam lotes por memória compartilhada
+    volumes:
+      - cifar10:/data
+      - ./out:/out
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  cifar10:
+    name: pah-cifar10 # sem o prefixo do compose: é o mesmo volume que o CI usa
