@@ -15,11 +15,13 @@ import argparse
 import json
 import re
 import sys
+import time
 import urllib.request
 from collections.abc import Iterable, Sequence
 
 REPO = "pytorch/pytorch"
 HUB_URL = f"https://hub.docker.com/v2/repositories/{REPO}/tags?page_size=100&ordering=last_updated"
+ATTEMPTS = 4  # o Docker Hub (e a rede de quem roda) às vezes engasga
 TAG_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)-cuda(\d+)\.(\d+)-cudnn\d+-runtime$")
 
 
@@ -46,14 +48,26 @@ def pick_latest(tags: Iterable[str], max_cuda: tuple[int, int] | None = None) ->
     return max(candidates)[2]
 
 
+def _get_json(url: str) -> dict:
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                return json.load(response)
+        except (OSError, json.JSONDecodeError) as error:  # TimeoutError e URLError são OSError
+            if attempt == ATTEMPTS:
+                raise
+            print(f"[aviso] tentativa {attempt}/{ATTEMPTS} falhou ({error}); tentando de novo", file=sys.stderr)
+            time.sleep(2**attempt)
+    raise AssertionError("inalcançável")
+
+
 def fetch_tags(max_pages: int = 5) -> list[str]:
     url: str | None = HUB_URL
     tags: list[str] = []
     for _ in range(max_pages):
         if url is None:
             break
-        with urllib.request.urlopen(url, timeout=30) as response:
-            page = json.load(response)
+        page = _get_json(url)
         tags += [result["name"] for result in page["results"]]
         url = page.get("next")
     return tags

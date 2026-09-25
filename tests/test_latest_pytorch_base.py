@@ -35,3 +35,23 @@ def test_parse_cuda():
     assert parse_cuda("13.4") == (13, 4)
     with pytest.raises(ValueError):
         parse_cuda("13")
+
+
+def test_fetch_retries_transient_network_errors(monkeypatch):
+    import io
+    import json
+
+    import latest_pytorch_base
+
+    calls = []
+
+    def flaky_urlopen(url, timeout):
+        calls.append(url)
+        if len(calls) == 1:
+            raise TimeoutError("The read operation timed out")
+        return io.BytesIO(json.dumps({"results": [{"name": "2.14.0-cuda13.2-cudnn9-runtime"}], "next": None}).encode())
+
+    monkeypatch.setattr(latest_pytorch_base.urllib.request, "urlopen", flaky_urlopen)
+    monkeypatch.setattr(latest_pytorch_base.time, "sleep", lambda _: None)
+    assert latest_pytorch_base.fetch_tags() == ["2.14.0-cuda13.2-cudnn9-runtime"]
+    assert len(calls) == 2
