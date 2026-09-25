@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x" # sempre o Python estável mais novo
+      - name: Instalar torch (CPU) e ferramentas
+        run: |
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install pytest ruff
+      - name: Lint
+        run: ruff check .
+      - name: Testes (inclui ResNet, treino e benchmark em CPU)
+        run: pytest -v

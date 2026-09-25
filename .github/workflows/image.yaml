@@ -1,0 +1,68 @@
+name: Imagem (GHCR)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - pytorch_arc_hosted/**
+      - scripts/latest_pytorch_base.py
+      - .github/workflows/image.yaml
+  schedule:
+    - cron: "0 6 * * 1" # segunda 06:00 UTC: pega base nova mesmo sem commit
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/lorkyrr/pytorch-arc-hosted
+  # Maior CUDA que o driver do host suporta (canto superior direito do nvidia-smi).
+  # Atualize junto com o driver. Hoje: driver 615 -> CUDA 13.4.
+  MAX_CUDA: "13.4"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolver a imagem base mais nova
+        id: base
+        run: echo "image=$(python3 scripts/latest_pytorch_base.py --max-cuda "$MAX_CUDA")" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          pull: true
+          push: true
+          build-args: BASE=${{ steps.base.outputs.image }}
+          labels: org.opencontainers.image.base.name=${{ steps.base.outputs.image }}
+          # Cache inline: os metadados de cache vão dentro da própria imagem no GHCR.
+          # Se a base não mudou, o próximo build reaproveita as camadas sem refazer
+          # o RUN e sem baixar os ~3 GB da base de novo. Sem artefato extra no registry.
+          cache-from: type=registry,ref=${{ env.IMAGE }}:latest
+          cache-to: type=inline
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+
+      - name: Resumo
+        env:
+          BASE_IMAGE: ${{ steps.base.outputs.image }}
+        run: |
+          {
+            echo "### Imagem publicada"
+            echo "- \`$IMAGE:$GITHUB_SHA\` (e \`:latest\`)"
+            echo "- base: \`$BASE_IMAGE\` (MAX_CUDA=$MAX_CUDA)"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,113 @@
+name: GPU (RTX 3050)
+
+on:
+  workflow_run:
+    workflows: ["Imagem (GHCR)"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Modo
+        type: choice
+        options: [benchmark, train]
+        default: benchmark
+      arch:
+        description: Arquitetura (treino)
+        type: choice
+        options: [resnet20, resnet56, resnet110]
+        default: resnet20
+      epochs:
+        description: Épocas (treino)
+        default: "30"
+      batch_size:
+        description: Tamanho do lote (treino)
+        default: "128"
+      lr:
+        description: Taxa de aprendizado inicial (treino)
+        default: "0.1"
+      amp:
+        description: Precisão mista (AMP)
+        type: boolean
+        default: true
+      seed:
+        description: Semente (vazio = aleatória)
+        default: ""
+      image_tag:
+        description: Tag da imagem no GHCR (sha de um commit ou latest)
+        default: latest
+
+permissions:
+  contents: read
+  packages: read
+
+# Só existe uma GPU física: jobs esperam na fila, nunca se cancelam
+concurrency:
+  group: gpu
+  cancel-in-progress: false
+
+jobs:
+  run:
+    # Segurança: este job roda na SUA máquina, com acesso ao Docker do host.
+    # Nunca tem gatilho de push/PR, e só aceita imagem buildada a partir da main.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: arc-runner-set-gpu
+    timeout-minutes: 120
+    env:
+      IMAGE: ghcr.io/lorkyrr/pytorch-arc-hosted:${{ github.event.workflow_run.head_sha || inputs.image_tag }}
+      CONTAINER: pah-${{ github.run_id }}-${{ github.run_attempt }}
+      MODE: ${{ inputs.mode || 'benchmark' }}
+    steps:
+      - name: Conferir a GPU que o Kubernetes reservou pra este pod
+        run: |
+          echo "NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-<vazio>}"
+          case "${NVIDIA_VISIBLE_DEVICES:-}" in
+            "" | all | none | void)
+              echo "::error::o pod não recebeu uma GPU específica do device plugin. Rode 'scripts/cluster.sh status'."
+              exit 1 ;;
+          esac
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Baixar a imagem (só as camadas que o host ainda não tem)
+        run: docker pull "$IMAGE"
+
+      - name: Rodar
+        env:
+          ARCH: ${{ inputs.arch }}
+          EPOCHS: ${{ inputs.epochs }}
+          BATCH_SIZE: ${{ inputs.batch_size }}
+          LR: ${{ inputs.lr }}
+          AMP: ${{ inputs.amp }}
+          SEED: ${{ inputs.seed }}
+        run: |
+          args=("$MODE" --require-gpu)
+          if [ "$MODE" = train ]; then
+            args+=(--arch "$ARCH" --epochs "$EPOCHS" --batch-size "$BATCH_SIZE" --lr "$LR")
+            if [ "$AMP" = false ]; then args+=(--no-amp); fi
+            if [ -n "$SEED" ]; then args+=(--seed "$SEED"); fi
+          fi
+          # O docker daqui fala com o daemon do HOST (socket montado): o container
+          # é "irmão" do pod, preso à mesma GPU que o k8s reservou para este pod.
+          docker run --name "$CONTAINER" --gpus "device=$NVIDIA_VISIBLE_DEVICES" --shm-size=1g \
+            -v pah-cifar10:/data "$IMAGE" "${args[@]}"
+
+      - name: Coletar resultados e limpar
+        if: always()
+        run: |
+          mkdir -p out
+          docker cp "$CONTAINER:/out/." out/ 2>/dev/null || true
+          if [ -f out/summary.md ]; then cat out/summary.md >> "$GITHUB_STEP_SUMMARY"; fi
+          docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+
+      - uses: actions/upload-artifact@v7
+        if: env.MODE == 'train'
+        with:
+          name: ${{ inputs.arch }}-cifar10-${{ github.run_id }}
+          path: out/
+          if-no-files-found: warn
