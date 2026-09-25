@@ -1,0 +1,28 @@
+# Values do chart gha-runner-scale-set (ARC): o runner set com GPU.
+# Aplicado pelo scripts/cluster.sh, que ainda injeta via --set:
+#   githubConfigUrl                                     -> https://github.com/<owner>/<repo>
+#   template.spec.securityContext.supplementalGroups[0] -> GID do /var/run/docker.sock do host
+# (o GID muda de máquina pra máquina; a imagem do runner cria o grupo docker com GID 123)
+githubConfigSecret: pah-github-token
+minRunners: 0
+maxRunners: 1 # uma GPU física = um runner por vez
+
+template:
+  spec:
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        resources:
+          limits:
+            # Reserva a GPU no scheduler. O device plugin injeta
+            # NVIDIA_VISIBLE_DEVICES=<UUID>, que o gpu.yaml repassa ao docker run.
+            nvidia.com/gpu: 1
+        volumeMounts:
+          - name: docker-sock
+            mountPath: /var/run/docker.sock
+    volumes:
+      - name: docker-sock
+        hostPath:
+          path: /var/run/docker.sock
+          type: Socket

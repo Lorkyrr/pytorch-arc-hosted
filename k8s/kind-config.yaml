@@ -1,0 +1,36 @@
+# Cluster kind "pah": um node, com a GPU do host e o socket do Docker do host.
+# Pré-requisito no host: Docker com runtime padrão "nvidia" e
+# accept-nvidia-visible-devices-as-volume-mounts = true (ver README).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraMounts:
+      # Caminho "mágico" do NVIDIA Container Runtime: montar algo aqui faz ele
+      # injetar driver e /dev/nvidia* no container do node.
+      - hostPath: /dev/null
+        containerPath: /var/run/nvidia-container-devices/all
+      # Binários do Container Toolkit (a injeção automática só traz as libs do driver)
+      - hostPath: /usr/bin/nvidia-container-runtime
+        containerPath: /usr/bin/nvidia-container-runtime
+        readOnly: true
+      - hostPath: /usr/bin/nvidia-container-cli
+        containerPath: /usr/bin/nvidia-container-cli
+        readOnly: true
+      - hostPath: /usr/bin/nvidia-ctk
+        containerPath: /usr/bin/nvidia-ctk
+        readOnly: true
+      # Socket do Docker do HOST: os pods runner o recebem via hostPath e rodam
+      # `docker pull/run` no daemon do host (cache de camadas persistente).
+      - hostPath: /var/run/docker.sock
+        containerPath: /var/run/docker.sock
+containerdConfigPatches:
+  # O containerd INTERNO do node (não o Docker do host) também precisa do runtime
+  # nvidia como padrão; sem isso, o device plugin não enxerga a GPU.
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".containerd]
+      default_runtime_name = "nvidia"
+    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia]
+      runtime_type = "io.containerd.runc.v2"
+      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia.options]
+        BinaryName = "/usr/bin/nvidia-container-runtime"
