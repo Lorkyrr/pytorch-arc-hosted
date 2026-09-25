@@ -18,3 +18,6 @@ select = ["E", "F", "I", "B", "UP"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = [".", "scripts"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pytorch_arc_hosted", "latest_pytorch_base"]
