@@ -33,20 +33,20 @@ Design and plan (read before any structural change):
 
 ## Handoff: current state
 
-**As of 2026-09-24** (the author's internet was bad, so **nothing heavy was downloaded locally**):
+**As of 2026-09-28** (the author's internet has been bad since 2026-09-24, so **nothing heavy was downloaded locally**):
 
 | Item | State |
 |---|---|
 | Package, tests, Dockerfile, compose, 3 workflows, Dependabot, kind config, runner values, `cluster.sh`, docs | Done and committed on `main` |
 | Local checks | `ruff check .` clean. `pytest`: the torch-free tests pass (CLI parsing, base-image resolver). The torch tests skip locally because torch is not installed on the host, on purpose. `shellcheck` is clean on `cluster.sh` and on every workflow `run:` block. `docker compose config` is OK. |
 | Base image resolver, real run | Verified 2026-09-24: `pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime` |
-| Push to GitHub, CI, and image build | See "Remote verification log" at the end of this file |
-| kind cluster `pah` | **Not created.** The old cluster `kind` from the earlier repos **still exists** and must be deleted first (`kind delete cluster --name kind`). `cluster.sh up` refuses to run while it exists. |
+| Push to GitHub, CI, image build, and GHCR | ✅ Verified on GitHub (see "Remote verification log" at the end) |
+| kind cluster `pah` | **Not created.** Two old clusters from the earlier repos **still exist**: `kind` (pytorch-gpu-sandbox) and `nvidia` (probably `../pytorch-gpu-refactor/scripts/cluster-nvidia.sh`). Both must be deleted first (`kind delete cluster --name kind`, then `--name nvidia`), and `cluster.sh up` refuses to run while any other kind cluster exists. They were **not** deleted automatically: that's destructive and the author's call. |
 | First real GPU run | **Not done.** Blocked on the cluster (and on good internet, since the first pull is ~3.3 GB). |
 
 ### Next steps (in order)
 
-1. When the internet is good: `kind delete cluster --name kind`, then `scripts/cluster.sh up`.
+1. When the internet is good: `kind get clusters`, delete the old ones (`kind delete cluster --name kind` and `--name nvidia`), then `scripts/cluster.sh up`.
 2. Optional: `docker pull ghcr.io/lorkyrr/pytorch-arc-hosted:latest` to pre-warm the host cache.
 3. `gh workflow run gpu.yaml`, then `gh run watch`. Check the first step's output for
    `NVIDIA_VISIBLE_DEVICES=GPU-…` (open verification point 1).
@@ -66,9 +66,9 @@ Design and plan (read before any structural change):
    `images/Dockerfile` installs Docker 29.8.1 static binaries and buildx, and creates the group
    `docker` with GID 123. Our pod adds the **host socket's GID** (1002 on this host) via
    `supplementalGroups`.
-3. **GHCR package visibility:** the first push creates the package as private. `gpu.yaml` logs in
-   with `GITHUB_TOKEN` (`packages: read`), so pulls work either way. Making it public is optional
-   (package settings on GitHub).
+3. **GHCR package visibility:** verified 2026-09-28: the package is **public**. `gpu.yaml`
+   still logs in with `GITHUB_TOKEN` (`packages: read`), so it keeps working if the package ever
+   goes private.
 
 ## Cache strategy (where bytes live, and what not to re-download)
 
@@ -178,7 +178,7 @@ Ubuntu, NVIDIA driver 615 (CUDA ≤ 13.4), RTX 3050 Laptop 4 GB (cc 8.6). Docker
 runtime is already `nvidia`, and `accept-nvidia-visible-devices-as-volume-mounts = true` is
 already set. The `/var/run/docker.sock` GID is **1002**. kind v0.33.0; `gh` is logged in as
 `Lorkyrr`; `shellcheck` is available. The host Python is 3.14.4 with **no torch**. The old kind
-cluster `kind` still exists.
+clusters `kind` and `nvidia` still exist (as of 2026-09-28).
 
 Newest versions seen on 2026-09-24 (floating; for reference only): PyTorch base
 `2.14.0-cuda13.2-cudnn9-runtime`, ARC charts `0.14.2`, device plugin `v0.20.1`,
@@ -201,8 +201,18 @@ actions/runner `v2.337.0`, `actions/checkout@v7`, `setup-python@v7`, `upload-art
 | Docker socket `permission denied` in the job | The socket GID changed | `cluster.sh up` rereads the GID |
 | A "fixed" workflow still runs old code | "Re-run jobs" reuses the original SHA | "Run workflow" creates a new run |
 | Bind mounts from the job into `docker run` don't work | The daemon is the host's, and the pod FS isn't visible to it | Named volume for data, `docker cp` for outputs |
+| A `GPU (RTX 3050)` run sits "Queued" every Monday | The weekly `image.yaml` schedule triggers `gpu.yaml` via `workflow_run`, and without cluster `pah` there's no runner. It expires after 24h. **If the cluster comes up inside that window, the job runs and pulls the image.** | Harmless. Cancel it (`gh run cancel <id>`) if you don't want the pull yet |
+| First push of a new repo didn't trigger `image.yaml` | `paths:` filters can't diff the first push into an empty repo | `gh workflow run image.yaml` (or wait for the Monday schedule) |
 | Job cancelled but training keeps running | Killing the CLI doesn't kill the host container | The cleanup step runs on `always()` and does `docker rm -f` |
 
 ## Remote verification log
 
-(Filled in by plan Task 10 after the first push.)
+- **2026-09-25** — first push of `main` (`b70da99`, 12 commits) to an **empty** repo.
+  - `CI` run 36076731920 ✅ **35 passed** with torch CPU, Python `3.x`. This covers every torch test (resnet20 = 272,474 params, 6n+2 depth, CPU training smoke, checkpoint reload, benchmark smoke) plus `--require-gpu` exiting 2 on a CUDA-less runner.
+  - `Imagem (GHCR)` did **not** fire: path filters need a "before" commit to diff against, and the first push into an empty repo has none. Expected, and it won't recur.
+- **2026-09-28** — the weekly `schedule` ran `Imagem (GHCR)` (run 36420331267) ✅ in 1m36s.
+  - Base resolved to `pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime`. Inside the image: **torch 2.14.0+cu132, torchvision 0.29.0+cu132**.
+  - Pushed `ghcr.io/lorkyrr/pytorch-arc-hosted:{latest,b70da99…}`. The GHCR package is **public** (inherited from the public repo).
+  - The inline cache import failed harmlessly on this first build (no `:latest` existed yet). From the next build on it has something to reuse.
+  - It triggered `GPU (RTX 3050)` (run 36420506556), which sat **queued** 3h36m with no runner and was **cancelled** on purpose (no heavy local download yet).
+- Still pending: cluster `pah`, the first real GPU run, and open verification point 1.

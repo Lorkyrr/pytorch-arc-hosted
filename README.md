@@ -23,10 +23,10 @@ git push (main)
             checkpoint → artifact da run · resumo → Summary da run
 ```
 
-## Estado atual (2026-09-24)
+## Estado atual (2026-09-28)
 
 - ✅ Código, testes, Dockerfile, workflows, `cluster.sh` e docs prontos.
-- ✅ O CI e o build da imagem rodam no GitHub (não dependem da sua internet).
+- ✅ O CI (35 testes, com torch) e o build da imagem já rodaram com sucesso no GitHub. A imagem está publicada e pública em `ghcr.io/lorkyrr/pytorch-arc-hosted` (torch 2.14.0 + CUDA 13.2).
 - ⏳ **O cluster ainda não foi criado nesta máquina**, e a primeira execução real
   na GPU ainda não aconteceu. Siga "Primeira vez" abaixo quando a internet
   estiver boa.
@@ -71,8 +71,10 @@ do ARC (~0,5 GB), controller e device plugin (~0,2 GB), **base PyTorch
 código (KBs). A base só é baixada de novo quando sair uma versão nova do PyTorch.
 
 ```bash
-# 1. Derrube o cluster dos projetos antigos: dois clusters disputariam a mesma GPU
+# 1. Derrube os clusters dos projetos antigos: dois clusters disputariam a mesma GPU
+kind get clusters                 # nesta máquina: kind e nvidia (em 2026-09-28)
 kind delete cluster --name kind
+kind delete cluster --name nvidia
 ```
 
 ```bash
@@ -185,7 +187,7 @@ máquina para qualquer código que rode nele. Por isso:
 | Job falha em "Conferir a GPU que o Kubernetes reservou" | O pod não recebeu `NVIDIA_VISIBLE_DEVICES` com um UUID | Veja [CLAUDE.md](CLAUDE.md), "Open verification points", item 1 |
 | `[ERRO] --require-gpu: CUDA indisponível` | A base resolvida exige CUDA acima do driver, ou o `--gpus` não chegou | Confira o `MAX_CUDA` contra o `nvidia-smi` e a base no Summary do `Imagem (GHCR)` |
 | A run nova usa código velho | "Re-run jobs" repete a run no **SHA original** | Use "Run workflow" (cria uma run nova) |
-| Job de GPU fica em "Queued" para sempre | Cluster desligado, sem runner | `scripts/cluster.sh up` |
+| Job de GPU fica em "Queued" (toda segunda, depois do rebuild semanal) | Cluster desligado, sem runner. Ele expira em 24h, mas se o cluster subir antes o job roda e baixa a imagem. | `scripts/cluster.sh up`, ou `gh run cancel <id>` se ainda não quiser o download |
 
 ## Desenvolvimento
 
