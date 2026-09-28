@@ -41,12 +41,12 @@ Design and plan (read before any structural change):
 | Local checks | `ruff check .` clean. `pytest`: the torch-free tests pass (CLI parsing, base-image resolver). The torch tests skip locally because torch is not installed on the host, on purpose. `shellcheck` is clean on `cluster.sh` and on every workflow `run:` block. `docker compose config` is OK. |
 | Base image resolver, real run | Verified 2026-09-24: `pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime` |
 | Push to GitHub, CI, image build, and GHCR | ✅ Verified on GitHub (see "Remote verification log" at the end) |
-| kind cluster `pah` | **Not created.** Two old clusters from the earlier repos **still exist**: `kind` (pytorch-gpu-sandbox) and `nvidia` (probably `../pytorch-gpu-refactor/scripts/cluster-nvidia.sh`). Both must be deleted first (`kind delete cluster --name kind`, then `--name nvidia`), and `cluster.sh up` refuses to run while any other kind cluster exists. They were **not** deleted automatically: that's destructive and the author's call. |
+| kind cluster `pah` | **Not created yet.** The old clusters `kind` and `nvidia` were **deleted on 2026-09-28** at the author's request (inspected first: `kind` had no Helm releases; `nvidia` had only the ARC controller, no runner sets, so nothing was left orphaned on GitHub). Dry run of the `cluster.sh up` checks on 2026-09-28: prerequisites OK, no other clusters, repo detected, token OK, socket GID 1002. |
 | First real GPU run | **Not done.** Blocked on the cluster (and on good internet, since the first pull is ~3.3 GB). |
 
 ### Next steps (in order)
 
-1. When the internet is good: `kind get clusters`, delete the old ones (`kind delete cluster --name kind` and `--name nvidia`), then `scripts/cluster.sh up`.
+1. When the internet is good (the author planned 2026-09-29): `scripts/cluster.sh up`. The old clusters are already gone.
 2. Optional: `docker pull ghcr.io/lorkyrr/pytorch-arc-hosted:latest` to pre-warm the host cache.
 3. `gh workflow run gpu.yaml`, then `gh run watch`. Check the first step's output for
    `NVIDIA_VISIBLE_DEVICES=GPU-…` (open verification point 1).
@@ -66,7 +66,11 @@ Design and plan (read before any structural change):
    `images/Dockerfile` installs Docker 29.8.1 static binaries and buildx, and creates the group
    `docker` with GID 123. Our pod adds the **host socket's GID** (1002 on this host) via
    `supplementalGroups`.
-3. **GHCR package visibility:** verified 2026-09-28: the package is **public**. `gpu.yaml`
+3. **Helm 4 compatibility:** the host has Helm v4.3.0. `cluster.sh` only uses `upgrade --install`,
+   `--wait`, `--set`, `-f`, `list`, `--kube-context` and OCI charts, which all exist in Helm 4 (bare
+   `--wait` = the new watcher strategy). Confirm on the first `cluster.sh up`. If `--wait` misbehaves,
+   try `--wait=legacy`.
+4. **GHCR package visibility:** verified 2026-09-28: the package is **public**. `gpu.yaml`
    still logs in with `GITHUB_TOKEN` (`packages: read`), so it keeps working if the package ever
    goes private.
 
@@ -178,7 +182,7 @@ Ubuntu, NVIDIA driver 615 (CUDA ≤ 13.4), RTX 3050 Laptop 4 GB (cc 8.6). Docker
 runtime is already `nvidia`, and `accept-nvidia-visible-devices-as-volume-mounts = true` is
 already set. The `/var/run/docker.sock` GID is **1002**. kind v0.33.0; `gh` is logged in as
 `Lorkyrr`; `shellcheck` is available. The host Python is 3.14.4 with **no torch**. The old kind
-clusters `kind` and `nvidia` still exist (as of 2026-09-28).
+Old clusters `kind`/`nvidia` were deleted on 2026-09-28. **Helm is v4.3.0** (not v3).
 
 Newest versions seen on 2026-09-24 (floating; for reference only): PyTorch base
 `2.14.0-cuda13.2-cudnn9-runtime`, ARC charts `0.14.2`, device plugin `v0.20.1`,

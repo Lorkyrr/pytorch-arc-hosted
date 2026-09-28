@@ -56,7 +56,8 @@ Os passos servem para reinstalar ou montar em outra máquina.
    sudo nvidia-ctk config --in-place --set accept-nvidia-visible-devices-as-volume-mounts=true
    ```
 5. **kind, kubectl e helm** nas versões mais novas (binários oficiais em
-   `/usr/local/bin`; o helm pelo script oficial `get-helm-3`, não por snap/apt).
+   `/usr/local/bin`; o helm pelo script oficial `get-helm-4`, não por snap/apt).
+   Nesta máquina: kind v0.33.0, kubectl v1.37.0, Helm v4.3.0.
 6. **GitHub CLI** logado: `gh auth login`. O `cluster.sh` usa `gh auth token`
    para registrar o runner; nenhum token vai para arquivo.
 
@@ -71,10 +72,8 @@ do ARC (~0,5 GB), controller e device plugin (~0,2 GB), **base PyTorch
 código (KBs). A base só é baixada de novo quando sair uma versão nova do PyTorch.
 
 ```bash
-# 1. Derrube os clusters dos projetos antigos: dois clusters disputariam a mesma GPU
-kind get clusters                 # nesta máquina: kind e nvidia (em 2026-09-28)
-kind delete cluster --name kind
-kind delete cluster --name nvidia
+# 1. Confira que não sobrou cluster de projeto antigo: dois disputariam a mesma GPU
+kind get clusters                 # esperado: "No kind clusters found." (os antigos saíram em 2026-09-28)
 ```
 
 ```bash
