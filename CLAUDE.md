@@ -169,8 +169,8 @@ docker compose run --rm app [train --epochs 30]            # local, same image +
 - `ruff` rules: E, F, I, B, UP; line length 120. `latest_pytorch_base` is declared first-party
   in the isort config (it lives in `scripts/`, which is on the pytest `pythonpath`).
 - Commits end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-- Superpowers workflow: brainstorming → spec → writing-plans → executing-plans. The inline-execution
-  ledger lives in `.superpowers/sdd/<plan>/progress.md` (git-ignored, local only).
+- Superpowers workflow: brainstorming → spec → writing-plans → executing-plans (inline) → one fresh
+  whole-branch review. The execution ledger was deleted after completion; its rulings are below.
 
 ## Host facts (this machine, 2026-09-24)
 
@@ -205,6 +205,20 @@ actions/runner `v2.337.0`, `actions/checkout@v7`, `setup-python@v7`, `upload-art
 | First push of a new repo didn't trigger `image.yaml` | `paths:` filters can't diff the first push into an empty repo | `gh workflow run image.yaml` (or wait for the Monday schedule) |
 | Job cancelled but training keeps running | Killing the CLI doesn't kill the host container | The cleanup step runs on `always()` and does `docker rm -f` |
 
+## Rulings made during implementation (deviations from the plan)
+
+- Implemented directly on `main`: the repo was new and empty, and the author asked for a push there.
+- Torch-dependent TDD RED/GREEN was verified only in `ci.yaml` (no local torch, no local downloads).
+- `pyproject.toml` declares `latest_pytorch_base` first-party for isort (it lives in `scripts/`).
+- The resolver retries 4x with backoff after a real Docker Hub `TimeoutError` on the author's link;
+  `cluster.sh` uses `curl --retry 4` for the same reason.
+- `image.yaml` uses an inline build cache (`cache-from` `:latest`, `cache-to: type=inline`). The author
+  asked for cache in GHA/GHCR, and this adds no extra registry artifact.
+- Final review: `concurrency` removed, `workflow_run` guard hardened, actions SHA-pinned, and
+  `docker/login-action` replaced with the `docker login` CLI in `gpu.yaml`. The checkpoint uploads on
+  `always()`, and orphan `pah-*` containers are removed before each run. All of this is locked by
+  `tests/test_workflows.py`.
+
 ## Known minor issues (deferred from the 2026-09-28 final review)
 
 Each one is cheap. None was fixed yet, on purpose (they're minors; the author decides):
@@ -233,4 +247,5 @@ Each one is cheap. None was fixed yet, on purpose (they're minors; the author de
   - Pushed `ghcr.io/lorkyrr/pytorch-arc-hosted:{latest,b70da99…}`. The GHCR package is **public** (inherited from the public repo).
   - The inline cache import failed harmlessly on this first build (no `:latest` existed yet). From the next build on it has something to reuse.
   - It triggered `GPU (RTX 3050)` (run 36420506556), which sat **queued** 3h36m with no runner and was **cancelled** on purpose (no heavy local download yet).
+- **2026-09-28** — the final-review fixes were pushed. `CI` run 36447776146 ✅ **41 passed**, including 6 new `tests/test_workflows.py` checks (`pyyaml` added to the CI install and to the `dev` extras).
 - Still pending: cluster `pah`, the first real GPU run, and open verification point 1.
