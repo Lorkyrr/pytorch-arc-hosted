@@ -18,7 +18,7 @@ jobs:
       - name: Instalar torch (CPU) e ferramentas
         run: |
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install pytest ruff
+          pip install pytest ruff pyyaml
       - name: Lint
         run: ruff check .
       - name: Testes (inclui ResNet, treino e benchmark em CPU)

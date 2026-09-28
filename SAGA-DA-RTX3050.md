@@ -66,6 +66,7 @@ lado deste texto, não confie só na minha descrição.
 26. [Dois clusters, uma GPU](#26-dois-clusters-uma-gpu)
 27. [O que ainda falta (Parte II)](#27-o-que-ainda-falta-parte-ii)
 28. [Comandos de referência rápida (Parte II)](#28-comandos-de-referência-rápida-parte-ii)
+29. [A revisão final: o `concurrency` que apagava treinos](#29-a-revisão-final-o-concurrency-que-apagava-treinos)
 
 ---
 
@@ -1143,6 +1144,16 @@ código de um desconhecido rodaria na sua máquina, com root. As defesas:
   `workflow_dispatch` (exige permissão de escrita) e `workflow_run`.
 - O `workflow_run` sempre executa a versão do workflow que está na branch
   padrão, e o job ainda confere `head_branch == 'main'`.
+- **Descoberto na revisão final (28/09):** o `workflow_run` casa os workflows
+  pelo **nome**. Um PR de fork que criasse um workflow chamado
+  `Imagem (GHCR)` também dispararia o `gpu.yaml`. Por isso a guarda agora
+  confere também o repositório de origem, o **arquivo** do workflow e o evento
+  (`push`, `schedule` ou `workflow_dispatch`, nunca PR).
+- No runner com root só rodam actions `actions/*` **fixadas por SHA de commit**
+  (uma tag como `@v7` pode ser movida por quem controla o repositório da
+  action). O login no GHCR virou `docker login` puro.
+- [tests/test_workflows.py](tests/test_workflows.py) transforma tudo isso em
+  teste: se alguém recolocar um `pull_request` ou uma tag mutável, o CI quebra.
 - O runner set é registrado **só neste repositório**.
 - Recomendação no README: exigir aprovação para workflows de forks.
 
@@ -1244,3 +1255,40 @@ docker compose run --rm app train --epochs 30
 # Qual base seria usada hoje
 python3 scripts/latest_pytorch_base.py --max-cuda 13.4
 ```
+
+---
+
+## 29. A revisão final: o `concurrency` que apagava treinos
+
+Depois das 10 tarefas, um revisor independente (um agente com contexto limpo,
+que não escreveu o código) leu o branch inteiro. Ele não achou nada crítico, mas
+achou um problema que nenhum teste pegaria.
+
+O `gpu.yaml` tinha `concurrency: {group: gpu, cancel-in-progress: false}`,
+herdado da Parte I, com o comentário "jobs esperam na fila, nunca se cancelam".
+**Isso é só metade da verdade.** O `cancel-in-progress: false` protege o job que
+**está rodando**. Para os que estão **esperando**, o GitHub guarda **no máximo 1
+pendente** por grupo: quando chega um terceiro, o pendente anterior é cancelado.
+
+Cenário real: um benchmark está rodando, você dispara um treino de 50 épocas
+(fica pendente), e aí chega o rebuild de segunda-feira com o seu benchmark
+automático. **Seu treino some**, com status "cancelled".
+
+A correção foi **remover** o bloco. A serialização já existia num lugar melhor:
+o runner set tem `maxRunners: 1` e cada pod pede `nvidia.com/gpu: 1`. A fila do
+ARC segura todos os jobs, sem descartar nenhum.
+
+Na mesma passada, mais duas correções:
+- **Checkpoint no timeout.** O upload do artifact agora usa `always()`. Um
+  ResNet-110 que estoure os 120 minutos ainda entrega o melhor checkpoint até
+  ali.
+- **Container órfão.** Se o pod morrer no meio (`cluster.sh down`, reboot), o
+  container de treino continua no host segurando a GPU. O próximo job agora
+  remove qualquer `pah-*` antes de começar.
+
+Cada correção entrou com um teste que falhou antes, em
+[tests/test_workflows.py](tests/test_workflows.py). Os achados menores ficaram
+listados no [CLAUDE.md](CLAUDE.md), seção "Known minor issues".
+
+**Lição:** comentário não é garantia. A frase "nunca se cancelam" estava errada
+desde a Parte I, e ninguém tinha lido a documentação do `concurrency` até o fim.

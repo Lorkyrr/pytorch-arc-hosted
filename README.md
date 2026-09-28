@@ -170,7 +170,12 @@ máquina para qualquer código que rode nele. Por isso:
 
 - O [gpu.yaml](.github/workflows/gpu.yaml) **nunca** tem gatilho de `push` ou
   `pull_request`. Ele só roda por `workflow_dispatch` (quem tem escrita no
-  repo) ou depois de um build da imagem **a partir da `main`**.
+  repo) ou depois de um build do `image.yaml` **deste repositório, na `main`**,
+  vindo de push, schedule ou dispatch. Nunca de PR nem de fork.
+- No runner com GPU só rodam actions `actions/*` **fixadas por SHA**. O login no
+  GHCR é o `docker login` puro, sem action de terceiros.
+- [tests/test_workflows.py](tests/test_workflows.py) trava essas propriedades
+  no CI.
 - O runner set é registrado **só neste repositório**.
 - Em **Settings → Actions → General**, na parte de workflows de pull requests
   de forks, exija **aprovação para todos os colaboradores externos**.

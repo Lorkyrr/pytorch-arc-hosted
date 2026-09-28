@@ -6,7 +6,7 @@ requires-python = ">=3.10"
 dependencies = ["torch", "torchvision"]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff"]
+dev = ["pytest", "ruff", "pyyaml"]
 
 [tool.ruff]
 line-length = 120

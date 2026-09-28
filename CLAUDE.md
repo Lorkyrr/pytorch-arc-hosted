@@ -102,9 +102,9 @@ Rejected alternatives (don't re-propose without new facts):
 | **Never `pytorch/pytorch:latest`** | It's frozen at 2024-02-23 (PyTorch 2.2.1). The old repos silently ran that. |
 | `MAX_CUDA: "13.4"` in `image.yaml` | Driver 615 supports up to CUDA 13.4. A newer-CUDA base would make `cuda.is_available()` false, which `--require-gpu` catches. |
 | **Always newest** (floating chart, device plugin, runner, Actions majors, Python `3.x`) plus Dependabot | Author's explicit preference; reproducibility traded for freshness. Resolved versions are printed (the image build summary, the container's env report, and `cluster.sh status`). |
-| `gpu.yaml` only has `workflow_run` and `workflow_dispatch`, plus a `head_branch == 'main'` guard | Public repo + self-hosted runner + host socket = root on the host. Fork PRs must never reach it. |
+| `gpu.yaml` only has `workflow_run` and `workflow_dispatch`. The `workflow_run` guard checks `conclusion`, `head_branch == 'main'`, `head_repository == github.repository`, `path == .github/workflows/image.yaml`, and `event in [push, schedule, workflow_dispatch]`. Actions are limited to `actions/*`, **SHA-pinned**; GHCR login uses the plain `docker login` CLI. Locked in by `tests/test_workflows.py`. | Public repo + self-hosted runner + host socket = root on the host. Fork PRs must never reach it. `workflow_run` matches by workflow **name**, so a fork PR defining a workflow named `Imagem (GHCR)` could otherwise trigger it (final review, 2026-09-28). |
 | `--require-gpu` in CI | Otherwise a CUDA failure silently falls back to CPU and the job goes green |
-| `concurrency: gpu`, `maxRunners: 1` | One physical GPU |
+| **No** `concurrency` block; `maxRunners: 1` + `nvidia.com/gpu: 1` | One physical GPU. A concurrency group keeps only 1 *pending* run and would silently cancel a queued training when the next benchmark arrives. The ARC queue holds all of them. |
 | `cluster.sh up` refuses if another kind cluster exists | Two device plugins on one GPU = contention (the old cluster `kind` exists on this host) |
 | Token via `$GITHUB_TOKEN` or `gh auth token`, piped to `kubectl create secret --from-file=/dev/stdin` | Never on disk and never in argv. The old repos used a `token.md` file. |
 | ResNet built from scratch (6n+2, option-B projection shortcuts); same hyperparameters as the old repos | Comparable to the old baselines. resnet20 has 272,474 params (asserted in the tests). |
@@ -204,6 +204,24 @@ actions/runner `v2.337.0`, `actions/checkout@v7`, `setup-python@v7`, `upload-art
 | A `GPU (RTX 3050)` run sits "Queued" every Monday | The weekly `image.yaml` schedule triggers `gpu.yaml` via `workflow_run`, and without cluster `pah` there's no runner. It expires after 24h. **If the cluster comes up inside that window, the job runs and pulls the image.** | Harmless. Cancel it (`gh run cancel <id>`) if you don't want the pull yet |
 | First push of a new repo didn't trigger `image.yaml` | `paths:` filters can't diff the first push into an empty repo | `gh workflow run image.yaml` (or wait for the Monday schedule) |
 | Job cancelled but training keeps running | Killing the CLI doesn't kill the host container | The cleanup step runs on `always()` and does `docker rm -f` |
+
+## Known minor issues (deferred from the 2026-09-28 final review)
+
+Each one is cheap. None was fixed yet, on purpose (they're minors; the author decides):
+
+1. `image.yaml`: `echo "image=$(python3 …)" >> "$GITHUB_OUTPUT"` masks a resolver failure (bash `-e`
+   ignores failures inside a command substitution within `echo`). The build then fails later with a
+   confusing blank-base error. Fix: `base=$(python3 …)` on its own line, then echo.
+2. `cli.py` `_positive`: `--lr nan` / `--lr inf` pass validation. Fix: `math.isfinite(number)`, plus
+   two cases in `test_rejects_invalid`.
+3. `cluster.sh`: `kind get clusters | grep -qx` under `pipefail` can SIGPIPE `kind` and report a false
+   "cluster doesn't exist" when another cluster name sorts after `pah`. Fix: `grep -x … >/dev/null`.
+4. `:<sha>` image tags are not immutable. The weekly schedule re-tags the current main SHA with a
+   newer base, so `image_tag=<sha>` doesn't reproduce an old run. Document it, or add a base-suffixed tag.
+5. README: loading the checkpoint on CPU needs `torch.load(p, map_location="cpu", weights_only=True)`.
+6. `cli.py`: the `--require-gpu` error goes to stdout. It should go to stderr.
+7. README: `timeout-minutes: 120` caps long runs (resnet110 / many epochs on a 3050). Mention it
+   next to the train examples. (The checkpoint now uploads even on timeout.)
 
 ## Remote verification log
 

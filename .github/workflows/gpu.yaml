@@ -40,18 +40,23 @@ permissions:
   contents: read
   packages: read
 
-# Só existe uma GPU física: jobs esperam na fila, nunca se cancelam
-concurrency:
-  group: gpu
-  cancel-in-progress: false
+# Sem bloco `concurrency`: o GitHub guarda só 1 run pendente por grupo e cancelaria
+# um treino na fila quando chegasse outro job. Quem serializa é o próprio runner set
+# (maxRunners: 1 + nvidia.com/gpu: 1): os jobs esperam na fila do ARC, nenhum some.
 
 jobs:
   run:
-    # Segurança: este job roda na SUA máquina, com acesso ao Docker do host.
-    # Nunca tem gatilho de push/PR, e só aceita imagem buildada a partir da main.
+    # Segurança: este job roda na SUA máquina, com acesso ao Docker do host (= root).
+    # Nunca tem gatilho de push/PR. O workflow_run casa workflows pelo NOME, então um PR
+    # de fork com um workflow homônimo também dispararia: por isso a guarda confere o
+    # repositório de origem, o arquivo do workflow e o evento, e não só a branch.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       github.event.workflow_run.path == '.github/workflows/image.yaml' &&
+       contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event.workflow_run.event))
     runs-on: arc-runner-set-gpu
     timeout-minutes: 120
     env:
@@ -68,11 +73,12 @@ jobs:
               exit 1 ;;
           esac
 
-      - uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      # `docker login` puro em vez de uma action de terceiros: aqui tudo roda com root no host
+      - name: Login no GHCR
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: printf '%s' "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
 
       - name: Baixar a imagem (só as camadas que o host ainda não tem)
         run: docker pull "$IMAGE"
@@ -92,6 +98,9 @@ jobs:
             if [ "$AMP" = false ]; then args+=(--no-amp); fi
             if [ -n "$SEED" ]; then args+=(--seed "$SEED"); fi
           fi
+          # Container órfão de um job cujo pod morreu (cluster.sh down, reboot) ainda seguraria
+          # a GPU. Com maxRunners: 1, nenhum outro job nosso pode estar rodando agora.
+          docker ps -aq --filter "name=^pah-" | xargs -r docker rm -f
           # O docker daqui fala com o daemon do HOST (socket montado): o container
           # é "irmão" do pod, preso à mesma GPU que o k8s reservou para este pod.
           docker run --name "$CONTAINER" --gpus "device=$NVIDIA_VISIBLE_DEVICES" --shm-size=1g \
@@ -104,9 +113,12 @@ jobs:
           docker cp "$CONTAINER:/out/." out/ 2>/dev/null || true
           if [ -f out/summary.md ]; then cat out/summary.md >> "$GITHUB_STEP_SUMMARY"; fi
           docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+          docker logout ghcr.io >/dev/null 2>&1 || true
 
-      - uses: actions/upload-artifact@v7
-        if: env.MODE == 'train'
+      # Fixado por SHA (o Dependabot atualiza o SHA e o comentário). always(): se o treino
+      # estourar o timeout ou for cancelado, o melhor checkpoint até ali ainda sobe.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && env.MODE == 'train'
         with:
           name: ${{ inputs.arch }}-cifar10-${{ github.run_id }}
           path: out/
