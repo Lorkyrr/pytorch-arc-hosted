@@ -203,7 +203,7 @@ actions/runner `v2.337.0`, `actions/checkout@v7`, `setup-python@v7`, `upload-art
 | Docker socket `permission denied` in the job | The socket GID changed | `cluster.sh up` rereads the GID |
 | A "fixed" workflow still runs old code | "Re-run jobs" reuses the original SHA | "Run workflow" creates a new run |
 | Bind mounts from the job into `docker run` don't work | The daemon is the host's, and the pod FS isn't visible to it | Named volume for data, `docker cp` for outputs |
-| A `GPU (RTX 3050)` run sits "Queued" every Monday | The weekly `image.yaml` schedule triggers `gpu.yaml` via `workflow_run`, and without cluster `pah` there's no runner. It expires after 24h. **If the cluster comes up inside that window, the job runs and pulls the image.** | Harmless. Cancel it (`gh run cancel <id>`) if you don't want the pull yet |
+| A `PyTorch GPU (CIFAR-10) - Docker` run (named `GPU (RTX 3050)` until 2026-09-29) sits "Queued" every Monday | The weekly `image.yaml` schedule triggers `gpu.yaml` via `workflow_run`, and without cluster `pah` there's no runner. It expires after 24h. **If the cluster comes up inside that window, the job runs and pulls the image.** | Harmless. Cancel it (`gh run cancel <id>`) if you don't want the pull yet |
 | First push of a new repo didn't trigger `image.yaml` | `paths:` filters can't diff the first push into an empty repo | `gh workflow run image.yaml` (or wait for the Monday schedule) |
 | Job cancelled but training keeps running | Killing the CLI doesn't kill the host container | The cleanup step runs on `always()` and does `docker rm -f` |
 

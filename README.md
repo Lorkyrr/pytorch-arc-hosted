@@ -16,7 +16,7 @@ git push (main)
    └─► Imagem (GHCR)  (GitHub)       resolve a base PyTorch mais nova → build → ghcr.io/lorkyrr/pytorch-arc-hosted:<sha>
             │ terminou com sucesso (workflow_run)
             ▼
-        GPU (RTX 3050)  (SUA máquina, runner ARC no kind)
+        PyTorch GPU (CIFAR-10) - Docker  (SUA máquina, runner ARC no kind)
             pod do runner: reserva nvidia.com/gpu: 1 → recebe NVIDIA_VISIBLE_DEVICES=<UUID>
             docker pull  (daemon do host: só baixa as camadas novas)
             docker run --gpus device=<UUID> -v pah-cifar10:/data  <imagem>  benchmark|train
@@ -99,7 +99,7 @@ builda a imagem e roda o benchmark na GPU sozinho. Toda segunda-feira, o
 
 ## Rodar um treino
 
-Pela interface: **Actions → GPU (RTX 3050) → Run workflow**, escolha `train` e
+Pela interface: **Actions → PyTorch GPU (CIFAR-10) - Docker → Run workflow**, escolha `train` e
 os parâmetros. Ou pelo terminal:
 
 ```bash

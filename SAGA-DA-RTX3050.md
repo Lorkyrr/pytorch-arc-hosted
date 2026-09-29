@@ -1086,7 +1086,7 @@ Duas curiosidades:
   baixar os ~3 GB de novo, e sem criar nenhum artefato extra no registry.
 
 **Como verificar:** na aba Actions, uma run de "Imagem (GHCR)" deve ser seguida
-de uma run de "GPU (RTX 3050)". O Summary do build mostra a base escolhida.
+de uma run de "PyTorch GPU (CIFAR-10) - Docker" (que se chamava "GPU (RTX 3050)" até 29/09). O Summary do build mostra a base escolhida.
 
 ---
 

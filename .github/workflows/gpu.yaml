@@ -1,4 +1,8 @@
-name: GPU (RTX 3050)
+name: PyTorch GPU (CIFAR-10) - Docker
+# O que cada run fez, direto na lista do Actions (workflow_run não tem inputs -> benchmark)
+run-name: >-
+  CIFAR-10 · ${{ inputs.mode || 'benchmark' }}${{ inputs.mode == 'train' && format(' · {0} · {1} épocas', inputs.arch, inputs.epochs) || '' }}
+  · RTX 3050 · imagem ${{ inputs.image_tag || github.event.workflow_run.head_sha }}
 
 on:
   workflow_run:
@@ -127,7 +131,8 @@ jobs:
 
       # Fixado por SHA (o Dependabot atualiza o SHA e o comentário). always(): se o treino
       # estourar o timeout ou for cancelado, o melhor checkpoint até ali ainda sobe.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Publicar checkpoint e resumo (artifact)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always() && env.MODE == 'train'
         with:
           name: ${{ inputs.arch }}-cifar10-${{ github.run_id }}
