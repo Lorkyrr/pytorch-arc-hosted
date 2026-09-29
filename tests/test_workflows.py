@@ -49,11 +49,22 @@ def test_checkpoint_upload_survives_failure_timeout_and_cancel():
     assert upload["if"].replace(" ", "").startswith("always()&&")
 
 
+JOB_LABEL = "pah-arc-hosted.job"
+
+
 def test_run_step_removes_orphaned_containers_before_starting():
     script = _step("Rodar")["run"]
-    cleanup = 'docker ps -aq --filter "name=^pah-" | xargs -r docker rm -f'
+    cleanup = f'docker ps -aq --filter "label={JOB_LABEL}" | xargs -r docker rm -f'
     assert cleanup in script
     assert script.index(cleanup) < script.index("docker run")
+
+
+def test_orphan_cleanup_can_only_hit_job_containers():
+    # Regressão de 2026-09-29: `--filter name=^pah-` casou com `pah-control-plane`, o node do
+    # cluster kind "pah", e o job apagou o próprio cluster. Filtro por label exclusivo, nunca por nome.
+    script = _step("Rodar")["run"]
+    assert "--filter \"name=" not in script and "--filter name=" not in script
+    assert f"--label {JOB_LABEL}" in script  # o docker run marca o container que cria
 
 
 CHECK_STEP = "Descobrir a GPU que o Kubernetes reservou pra este pod"

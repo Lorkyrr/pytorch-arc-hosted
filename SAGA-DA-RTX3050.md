@@ -1284,7 +1284,8 @@ Na mesma passada, mais duas correções:
   ali.
 - **Container órfão.** Se o pod morrer no meio (`cluster.sh down`, reboot), o
   container de treino continua no host segurando a GPU. O próximo job agora
-  remove qualquer `pah-*` antes de começar.
+  remove os containers de job órfãos antes de começar. (Ver capítulo 30: a
+  primeira versão desta limpeza filtrava por **nome** e apagou o próprio cluster.)
 
 Cada correção entrou com um teste que falhou antes, em
 [tests/test_workflows.py](tests/test_workflows.py). Os achados menores ficaram

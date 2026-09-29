@@ -98,6 +98,18 @@ wait_for_gpu() {
   die "o node não anunciou nvidia.com/gpu em 5 min (kubectl --context $CONTEXT -n kube-system logs ds/nvidia-device-plugin-daemonset)"
 }
 
+preload_runner_image() {
+  local image
+  image=$(awk '/image: ghcr.io\/actions\/actions-runner/ {print $2; exit}' "$ROOT/k8s/runner-values.yaml")
+  [ -n "$image" ] || die "não achei a imagem do runner em k8s/runner-values.yaml"
+  log "Imagem do runner no node: $image"
+  # O kubelet desiste de um pull depois de ~2 min, e numa rede lenta a imagem (~1,5 GB) não chega
+  # (visto em 2026-09-29: ErrImagePull/DeadlineExceeded). O docker pull do host não tem esse prazo e
+  # só baixa o que mudou; o kind load copia a imagem para o containerd do node.
+  docker pull "$image"
+  kind load docker-image "$image" --name "$CLUSTER"
+}
+
 cmd_up() {
   local slug token plugin gid
   check_prereqs
@@ -114,6 +126,8 @@ cmd_up() {
   fi
   docker exec "$CLUSTER-control-plane" nvidia-smi -L ||
     die "a GPU não aparece dentro do node do kind (README: 'Solução de problemas')"
+
+  preload_runner_image
 
   plugin=$(latest_release NVIDIA/k8s-device-plugin)
   [ -n "$plugin" ] || die "não consegui descobrir a versão mais nova do NVIDIA device plugin"

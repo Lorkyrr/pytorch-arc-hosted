@@ -220,7 +220,7 @@ actions/runner `v2.337.0`, `actions/checkout@v7`, `setup-python@v7`, `upload-art
   asked for cache in GHA/GHCR, and this adds no extra registry artifact.
 - Final review: `concurrency` removed, `workflow_run` guard hardened, actions SHA-pinned, and
   `docker/login-action` replaced with the `docker login` CLI in `gpu.yaml`. The checkpoint uploads on
-  `always()`, and orphan `pah-*` containers are removed before each run. All of this is locked by
+  `always()`, and orphan job containers are removed before each run — by the label `pah-arc-hosted.job`, **never by name** (a `name=^pah-` filter matched the kind node `pah-control-plane` and the job deleted its own cluster on 2026-09-29). All of this is locked by
   `tests/test_workflows.py`.
 
 ## Known minor issues (deferred from the 2026-09-28 final review)
