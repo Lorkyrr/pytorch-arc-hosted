@@ -85,7 +85,9 @@ latest_release() { # $1 = owner/repo no GitHub
 
 wait_for_gpu() {
   local gpus
-  for _ in $(seq 60); do
+  # 5 min: na 1ª subida o plugin leva ~2 min entre o pod ficar Ready e registrar a GPU
+  # no kubelet (medido em 2026-09-29); 2 min não bastavam.
+  for _ in $(seq 150); do
     gpus=$(k get nodes -o jsonpath='{.items[0].status.allocatable.nvidia\.com/gpu}')
     if [ "${gpus:-0}" -ge 1 ]; then
       echo "GPU alocável no node: $gpus"
@@ -93,7 +95,7 @@ wait_for_gpu() {
     fi
     sleep 2
   done
-  die "o node não anunciou nvidia.com/gpu em 2 min (kubectl --context $CONTEXT -n kube-system logs ds/nvidia-device-plugin-daemonset)"
+  die "o node não anunciou nvidia.com/gpu em 5 min (kubectl --context $CONTEXT -n kube-system logs ds/nvidia-device-plugin-daemonset)"
 }
 
 cmd_up() {
