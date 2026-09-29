@@ -54,3 +54,59 @@ def test_run_step_removes_orphaned_containers_before_starting():
     cleanup = 'docker ps -aq --filter "name=^pah-" | xargs -r docker rm -f'
     assert cleanup in script
     assert script.index(cleanup) < script.index("docker run")
+
+
+CHECK_STEP = "Descobrir a GPU que o Kubernetes reservou pra este pod"
+UUID = "GPU-18e10a1a-6e1e-a359-305e-37f93ae6d626"
+
+
+def _run_check(tmp_path, env_value, smi_output):
+    """Executa o script real do passo, com um nvidia-smi falso no PATH."""
+    import shutil
+    import subprocess
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    if smi_output is not None:
+        smi = bin_dir / "nvidia-smi"
+        smi.write_text(f"#!/bin/sh\nprintf '{smi_output}'\n")
+        smi.chmod(0o755)
+    github_env = tmp_path / "github_env"
+    github_env.touch()
+    # PATH isolado: o nvidia-smi REAL da máquina de teste não pode vazar pro caso "sem GPU"
+    (bin_dir / "tr").symlink_to(shutil.which("tr"))
+    env = {"PATH": str(bin_dir), "GITHUB_ENV": str(github_env)}
+    if env_value is not None:
+        env["NVIDIA_VISIBLE_DEVICES"] = env_value
+    proc = subprocess.run(
+        [shutil.which("bash"), "-e", "-c", _step(CHECK_STEP)["run"]], env=env, capture_output=True, text=True
+    )
+    return proc.returncode, github_env.read_text()
+
+
+def test_gpu_uuid_from_device_plugin_envvar(tmp_path):
+    assert _run_check(tmp_path, UUID, smi_output=None) == (0, f"GPU_UUID={UUID}\n")
+
+
+def test_gpu_uuid_from_nvidia_smi_when_toolkit_sets_void(tmp_path):
+    # Toolkit >= 1.20 injeta a GPU via CDI e troca a variável por "void" (visto em 2026-09-29)
+    assert _run_check(tmp_path, "void", smi_output=f"{UUID}\\n") == (0, f"GPU_UUID={UUID}\n")
+
+
+@pytest.mark.parametrize(
+    ("env_value", "smi_output"),
+    [
+        ("void", None),  # sem nvidia-smi: o pod não recebeu GPU
+        ("", ""),  # nada em lugar nenhum
+        ("all", f"{UUID}\\nGPU-00000000-0000-0000-0000-000000000000\\n"),  # 2 GPUs visíveis: não é uma reserva
+    ],
+)
+def test_gpu_check_refuses_anything_but_exactly_one_uuid(tmp_path, env_value, smi_output):
+    code, written = _run_check(tmp_path, env_value, smi_output)
+    assert code != 0 and written == ""
+
+
+def test_docker_run_uses_the_resolved_uuid():
+    script = _step("Rodar")["run"]
+    assert '--gpus "device=$GPU_UUID"' in script
+    assert "NVIDIA_VISIBLE_DEVICES" not in script

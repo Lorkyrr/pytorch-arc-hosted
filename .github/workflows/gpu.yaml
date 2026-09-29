@@ -64,14 +64,22 @@ jobs:
       CONTAINER: pah-${{ github.run_id }}-${{ github.run_attempt }}
       MODE: ${{ inputs.mode || 'benchmark' }}
     steps:
-      - name: Conferir a GPU que o Kubernetes reservou pra este pod
+      - name: Descobrir a GPU que o Kubernetes reservou pra este pod
         run: |
-          echo "NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-<vazio>}"
-          case "${NVIDIA_VISIBLE_DEVICES:-}" in
-            "" | all | none | void)
-              echo "::error::o pod não recebeu uma GPU específica do device plugin. Rode 'scripts/cluster.sh status'."
-              exit 1 ;;
-          esac
+          uuid="${NVIDIA_VISIBLE_DEVICES:-}"
+          # O NVIDIA Container Toolkit >= 1.20 injeta a GPU no pod via CDI e troca a variável
+          # por "void" (visto em 2026-09-29). Aí o UUID vem do nvidia-smi, que dentro do pod
+          # só enxerga a(s) GPU(s) que o device plugin alocou pra ele.
+          if [[ ! "$uuid" =~ ^GPU-[0-9a-f-]+$ ]]; then
+            uuid=$(nvidia-smi --query-gpu=uuid --format=csv,noheader 2>/dev/null | tr -d ' ' || true)
+          fi
+          echo "NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-<vazio>} -> GPU alocada: ${uuid:-<nenhuma>}"
+          # Exatamente um UUID. Vazio, "all" ou várias GPUs = sem reserva real: nunca cair pra --gpus all.
+          if [[ ! "$uuid" =~ ^GPU-[0-9a-f-]+$ ]]; then
+            echo "::error::o pod não recebeu exatamente uma GPU do device plugin. Rode 'scripts/cluster.sh status'."
+            exit 1
+          fi
+          echo "GPU_UUID=$uuid" >> "$GITHUB_ENV"
 
       # `docker login` puro em vez de uma action de terceiros: aqui tudo roda com root no host
       - name: Login no GHCR
@@ -103,7 +111,7 @@ jobs:
           docker ps -aq --filter "name=^pah-" | xargs -r docker rm -f
           # O docker daqui fala com o daemon do HOST (socket montado): o container
           # é "irmão" do pod, preso à mesma GPU que o k8s reservou para este pod.
-          docker run --name "$CONTAINER" --gpus "device=$NVIDIA_VISIBLE_DEVICES" --shm-size=1g \
+          docker run --name "$CONTAINER" --gpus "device=$GPU_UUID" --shm-size=1g \
             -v pah-cifar10:/data "$IMAGE" "${args[@]}"
 
       - name: Coletar resultados e limpar
