@@ -33,7 +33,7 @@ Design and plan (read before any structural change):
 
 ## Handoff: current state
 
-**As of 2026-09-28** (the author's internet has been bad since 2026-09-24, so **nothing heavy was downloaded locally**):
+**As of 2026-09-29**: the **first real GPU run succeeded** (run 36557180170). Cluster `pah` is up.
 
 | Item | State |
 |---|---|
@@ -41,22 +41,20 @@ Design and plan (read before any structural change):
 | Local checks | `ruff check .` clean. `pytest`: the torch-free tests pass (CLI parsing, base-image resolver). The torch tests skip locally because torch is not installed on the host, on purpose. `shellcheck` is clean on `cluster.sh` and on every workflow `run:` block. `docker compose config` is OK. |
 | Base image resolver, real run | Verified 2026-09-24: `pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime` |
 | Push to GitHub, CI, image build, and GHCR | ✅ Verified on GitHub (see "Remote verification log" at the end) |
-| kind cluster `pah` | **Not created yet.** The old clusters `kind` and `nvidia` were **deleted on 2026-09-28** at the author's request (inspected first: `kind` had no Helm releases; `nvidia` had only the ARC controller, no runner sets, so nothing was left orphaned on GitHub). Dry run of the `cluster.sh up` checks on 2026-09-28: prerequisites OK, no other clusters, repo detected, token OK, socket GID 1002. |
-| First real GPU run | **Not done.** Blocked on the cluster (and on good internet, since the first pull is ~3.3 GB). |
+| kind cluster `pah` | ✅ **Up since 2026-09-29** (recreated once, see the log). Before that: **not created.** The old clusters `kind` and `nvidia` were **deleted on 2026-09-28** at the author's request (inspected first: `kind` had no Helm releases; `nvidia` had only the ARC controller, no runner sets, so nothing was left orphaned on GitHub). Dry run of the `cluster.sh up` checks on 2026-09-28: prerequisites OK, no other clusters, repo detected, token OK, socket GID 1002. |
+| First real GPU run | ✅ **2026-09-29, benchmark, run 36557180170.** Numbers are in the Remote verification log. No real training run yet. |
 
 ### Next steps (in order)
 
-1. When the internet is good (the author planned 2026-09-29): `scripts/cluster.sh up`. The old clusters are already gone.
-2. Optional: `docker pull ghcr.io/lorkyrr/pytorch-arc-hosted:latest` to pre-warm the host cache.
-3. `gh workflow run gpu.yaml`, then `gh run watch`. Check the first step's output for
-   `NVIDIA_VISIBLE_DEVICES=GPU-…` (open verification point 1).
+1. ~~Cluster up, pre-pull, first benchmark~~: done on 2026-09-29.
+2. Pending decision: port the training robustness features from `Lorkyrr/tensor-kubectl-gpu` (the TensorFlow sibling). Options: resume + atomic state, SIGINT/NaN handling, `--synthetic`/`--max-samples`, `--json-out` + LR in log + REFLECT padding. The author asked for it on 2026-09-28; scope not chosen yet.
 4. Train: `gh workflow run gpu.yaml -f mode=train -f epochs=30`. Compare with the old baseline
    (89.40% for resnet20, 30 epochs, bs128, lr 0.1, FP32). AMP is on by default now.
 5. Record the results in this file and in SAGA chapter 27.
 
 ### Open verification points
 
-1. **Does the pod get `NVIDIA_VISIBLE_DEVICES=<GPU UUID>`, and do job steps inherit it?** The
+1. **RESOLVED 2026-09-29:** the pod gets `NVIDIA_VISIBLE_DEVICES=void`. NVIDIA Container Toolkit 1.20 injects the GPU via CDI and blanks the variable, even though the device plugin uses the `envvar`/`uuid` strategy. `gpu.yaml` now reads the UUID with `nvidia-smi` inside the pod, which only sees the allocated GPU, and still requires exactly one `GPU-…`. This is tested by executing the real step script with a fake nvidia-smi. Original question: **Does the pod get `NVIDIA_VISIBLE_DEVICES=<GPU UUID>`, and do job steps inherit it?** The
    device plugin's default `DEVICE_LIST_STRATEGY=envvar` should set it. `gpu.yaml` fails loudly if
    it is empty, `all`, `none`, or `void`, and **never** falls back to `--gpus all` (that would bring
    back the "GPU outside k8s accounting" gap from the old repos). If it doesn't arrive, the likely
@@ -66,7 +64,7 @@ Design and plan (read before any structural change):
    `images/Dockerfile` installs Docker 29.8.1 static binaries and buildx, and creates the group
    `docker` with GID 123. Our pod adds the **host socket's GID** (1002 on this host) via
    `supplementalGroups`.
-3. **Helm 4 compatibility:** the host has Helm v4.3.0. `cluster.sh` only uses `upgrade --install`,
+3. **RESOLVED 2026-09-29 (works as-is).** **Helm 4 compatibility:** the host has Helm v4.3.0. `cluster.sh` only uses `upgrade --install`,
    `--wait`, `--set`, `-f`, `list`, `--kube-context` and OCI charts, which all exist in Helm 4 (bare
    `--wait` = the new watcher strategy). Confirm on the first `cluster.sh up`. If `--wait` misbehaves,
    try `--wait=legacy`.
@@ -252,4 +250,15 @@ Each one is cheap. None was fixed yet, on purpose (they're minors; the author de
   - The inline cache import failed harmlessly on this first build (no `:latest` existed yet). From the next build on it has something to reuse.
   - It triggered `GPU (RTX 3050)` (run 36420506556), which sat **queued** 3h36m with no runner and was **cancelled** on purpose (no heavy local download yet).
 - **2026-09-28** — the final-review fixes were pushed. `CI` run 36447776146 ✅ **41 passed**, including 6 new `tests/test_workflows.py` checks (`pyyaml` added to the CI install and to the `dev` extras).
-- Still pending: cluster `pah`, the first real GPU run, and open verification point 1.
+- **2026-09-29**, first real run on the RTX 3050. Four problems were found and fixed, in order:
+  1. `cluster.sh up` gave up after waiting 2 min for `nvidia.com/gpu`. On a first boot the plugin needs about 2 min between pod Ready and registering with the kubelet. The wait is now 5 min.
+  2. The runner pod hit `ErrImagePull` / `DeadlineExceeded`: the kubelet gives up an image pull after ~2 min, and `actions-runner` (1.56 GB) didn't make it on a slow, shared link. `cluster.sh up` now does `docker pull` on the host (no deadline) plus `kind load docker-image`. The ARC job message consumed by the dead runner never comes back, so the queued run has to be cancelled and re-dispatched.
+  3. `NVIDIA_VISIBLE_DEVICES=void` (see verification point 1). The UUID now comes from `nvidia-smi` in the pod.
+  4. **Self-inflicted, and serious:** the orphan cleanup `docker ps --filter name=^pah-` (added in the final review) matched **`pah-control-plane`**, the kind node, so the job `docker rm -f`'d its own cluster. It now filters by the label `pah-arc-hosted.job`, and `test_orphan_cleanup_can_only_hit_job_containers` prevents regressions. A run whose runner died needs `gh api -X POST …/runs/<id>/force-cancel`.
+  - ✅ Run **36557180170** succeeded:
+    - Environment: PyTorch 2.14.0+cu132, cuDNN 92400, RTX 3050 Laptop 4.01 GB, cc 8.6, 16 SMs.
+    - Matmul: 1857 / 3383 / 3116 / 2438 GFLOPS for 1k / 2k / 4k / 6k.
+    - Conv: 340.7 img/s.
+    - AMP: 2.05× faster than FP32.
+    - Synthetic training: 1704 samples/s.
+    - VRAM peak: 841 MB.

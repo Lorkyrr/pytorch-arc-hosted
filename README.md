@@ -23,13 +23,11 @@ git push (main)
             checkpoint → artifact da run · resumo → Summary da run
 ```
 
-## Estado atual (2026-09-28)
+## Estado atual (2026-09-29)
 
 - ✅ Código, testes, Dockerfile, workflows, `cluster.sh` e docs prontos.
 - ✅ O CI (35 testes, com torch) e o build da imagem já rodaram com sucesso no GitHub. A imagem está publicada e pública em `ghcr.io/lorkyrr/pytorch-arc-hosted` (torch 2.14.0 + CUDA 13.2).
-- ⏳ **O cluster ainda não foi criado nesta máquina**, e a primeira execução real
-  na GPU ainda não aconteceu. Siga "Primeira vez" abaixo quando a internet
-  estiver boa.
+- ✅ **Primeira execução real na RTX 3050 em 2026-09-29** (benchmark: 3.383 GFLOPS, FP16 2,05× mais rápido). Ainda falta o primeiro treino real.
 
 ## Preparar o host (uma vez)
 

@@ -67,6 +67,7 @@ lado deste texto, não confie só na minha descrição.
 27. [O que ainda falta (Parte II)](#27-o-que-ainda-falta-parte-ii)
 28. [Comandos de referência rápida (Parte II)](#28-comandos-de-referência-rápida-parte-ii)
 29. [A revisão final: o `concurrency` que apagava treinos](#29-a-revisão-final-o-concurrency-que-apagava-treinos)
+30. [A primeira execução real: quatro quedas até o primeiro "success"](#30-a-primeira-execução-real-quatro-quedas-até-o-primeiro-success)
 
 ---
 
@@ -1293,3 +1294,64 @@ listados no [CLAUDE.md](CLAUDE.md), seção "Known minor issues".
 
 **Lição:** comentário não é garantia. A frase "nunca se cancelam" estava errada
 desde a Parte I, e ninguém tinha lido a documentação do `concurrency` até o fim.
+
+---
+
+## 30. A primeira execução real: quatro quedas até o primeiro "success"
+
+Em 29/09, com internet boa, o projeto rodou de verdade pela primeira vez. Deu
+certo na quinta tentativa, e cada falha ensinou algo que nenhum teste local
+pegaria.
+
+**1. A GPU que demorou a aparecer.** O `cluster.sh up` esperava 2 minutos pelo
+`nvidia.com/gpu` no node e desistiu. O log do device plugin mostrou que ele se
+registrou no kubelet **segundos depois** do prazo. Nada estava errado, só
+lento: na primeira subida, a NVML leva uns 2 minutos para inicializar dentro do
+kind. A espera virou 5 minutos.
+
+**2. O prazo do kubelet.** O pod do runner ficou em `ErrImagePull`
+(`DeadlineExceeded`). O kubelet dá uns 2 minutos para cada tentativa de baixar
+uma imagem, e a do runner (1,56 GB) não chegava, disputando a banda com o pull
+de 3,3 GB da imagem do projeto. Pior: o job que aquele runner tinha
+"reservado" **não volta para a fila** quando o runner morre. O run fica
+"queued" para sempre e precisa ser cancelado e disparado de novo. A solução
+permanente: o `cluster.sh` baixa a imagem pelo Docker do host (sem prazo) e a
+entrega ao node com `kind load docker-image`.
+
+**3. O `void`.** O primeiro passo do `gpu.yaml` barrou o job:
+`NVIDIA_VISIBLE_DEVICES=void`. O capítulo 21 apostava que a variável traria o
+UUID da GPU. Um pod de teste mostrou a verdade: a variável vinha `void`, **mas
+o `nvidia-smi` lá dentro enxergava a GPU**. O NVIDIA Container Toolkit 1.20
+entrega a placa por **CDI** e apaga a variável de propósito, para ninguém
+"reinjetar" GPUs a partir dela. O UUID passou a vir do `nvidia-smi` do pod, que
+só enxerga a GPU reservada. A regra de ouro ficou igual: exatamente um UUID,
+nunca `all`.
+
+**4. O job que apagou o próprio cluster.** Esta foi grave, e o erro foi meu (do
+Claude). No capítulo 29, a limpeza de containers órfãos filtrava por nome:
+`docker ps --filter "name=^pah-"`. O node do kind se chama
+**`pah-control-plane`**. O job rodou `docker rm -f` no próprio node em que
+estava rodando. O runner morreu no meio do passo, sem avisar o GitHub, que
+continuou mostrando "baixando a imagem" como se nada tivesse acontecido. A
+pista veio do `docker events`: `kill → die → destroy` no `pah-control-plane`
+às 07:34:10. O volume e o contexto do kubectl continuavam lá, então tinha sido
+`docker rm -f`, não `kind delete`.
+
+A correção: o `docker run` marca o container com
+`--label pah-arc-hosted.job`, e a limpeza filtra **só esse label**. O teste
+novo não verifica mais "a limpeza existe". Ele verifica **o que ela pode
+atingir**, que é a propriedade que importa.
+
+**Resultado** (run 36557180170):
+- PyTorch 2.14.0 com CUDA 13.2 na RTX 3050.
+- Até 3.383 GFLOPS no cuBLAS.
+- 340 imagens/s no cuDNN.
+- FP16 2,05× mais rápido que FP32.
+- Pico de 841 MB de VRAM.
+
+**Lições:**
+- Prefixo de nome não é identidade: use labels.
+- "O job está travado" pode significar "o job morreu e ninguém avisou". Olhe
+  a infraestrutura (`docker events`), não só a tela do GitHub.
+- Uma premissa de design (o UUID na variável) só vira fato depois de testada
+  no ambiente real. Deixar o plano B anotado no CLAUDE.md economizou horas.
